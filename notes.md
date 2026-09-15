@@ -1,7 +1,10 @@
 CRUD application
 
-data - DynamoDB
-    -serverless native: fully managed and scales
-    -cost effective: no server to deploy and pay per request
-    -fetch userID(partition key) and read user's habits
-
+COMPUTE - Lambda
+    -serverless: managed scales
+    -cost effective: pay per request
+NETWORK
+STORAGE - DynamoDB
+    -serverless: managed and scales
+    -cost effective: on-demand
+SECURITY
