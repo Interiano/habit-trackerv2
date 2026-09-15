@@ -1,0 +1,21 @@
+# Secrets & credentials — NEVER commit these
+.env
+*.pem
+credentials
+.aws/
+
+# Terraform (state can contain plaintext secrets)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
