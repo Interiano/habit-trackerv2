@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Habit Tracker</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #1a1d21;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --accent: #2563eb;
+    --accent-ink: #ffffff;
+    --danger: #b91c1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    display: flex;
+    justify-content: center;
+    padding: 48px 16px;
+  }
+  .wrap { width: 100%; max-width: 560px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 24px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  button {
+    font: inherit;
+    cursor: pointer;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    padding: 10px 16px;
+  }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-ghost { background: transparent; border-color: var(--line); color: var(--ink); }
+  .btn-link { background: none; border: none; color: var(--danger); padding: 4px 8px; }
+  header.bar {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  header.bar .who { color: var(--muted); font-size: 0.9rem; }
+  form { display: flex; gap: 8px; margin-bottom: 20px; }
+  form input, form select {
+    font: inherit; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 8px;
+  }
+  form input { flex: 1; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 4px; border-bottom: 1px solid var(--line);
+  }
+  li:last-child { border-bottom: none; }
+  li .name { font-weight: 600; }
+  li .freq { color: var(--muted); font-size: 0.85rem; margin-left: 8px; }
+  .empty { color: var(--muted); padding: 16px 4px; }
+  .status { margin-top: 16px; font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
+  .status.error { color: var(--danger); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Habit Tracker</h1>
+  <p class="sub">Serverless · Cognito auth · your own habits, isolated per user.</p>
+
+  <!-- Signed-out -->
+  <div id="signed-out" class="card">
+    <p>Sign in to view and add your habits.</p>
+    <button id="signin" class="btn-primary">Sign in / Sign up</button>
+  </div>
+
+  <!-- Signed-in -->
+  <div id="signed-in" class="card" hidden>
+    <header class="bar">
+      <span class="who" id="who"></span>
+      <button id="signout" class="btn-ghost">Sign out</button>
+    </header>
+
+    <form id="habit-form">
+      <input id="habit-name" placeholder="e.g. Drink water" required autocomplete="off" />
+      <select id="frequency">
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+      </select>
+      <button type="submit" class="btn-primary">Add</button>
+    </form>
+
+    <ul id="habit-list"></ul>
+    <p class="empty" id="empty" hidden>No habits yet — add one above.</p>
+    <p class="status" id="status"></p>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// CONFIG — verify these match your AWS resources before testing.
+// ─────────────────────────────────────────────────────────────
+const CONFIG = {
+  userPoolDomain: "https://us-east-19iff3mgvd.auth.us-east-1.amazoncognito.com",
+  clientId:       "5ts2kfhmp9sk9fo99td91hnlob",
+  redirectUri:    "http://localhost:5500",
+  apiUrl:         "https://ccjuxa6r22.execute-api.us-east-1.amazonaws.com",
+  scopes:         "openid email",
+};
+
+// ── DOM ──
+const el = (id) => document.getElementById(id);
+const status = (msg, isError=false) => {
+  const s = el("status");
+  s.textContent = msg || "";
+  s.classList.toggle("error", !!isError);
+};
+
+// ── PKCE helpers ──
+function base64url(bytes) {
+  return btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+async function sha256(str) {
+  return await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+}
+function randomString() {
+  const a = new Uint8Array(48);
+  crypto.getRandomValues(a);
+  return base64url(a);
+}
+
+// ── Auth: start login (redirect to Hosted UI) ──
+async function startLogin() {
+  const verifier = randomString();
+  sessionStorage.setItem("pkce_verifier", verifier);
+  const challenge = base64url(await sha256(verifier));
+  const u = new URL(CONFIG.userPoolDomain + "/oauth2/authorize");
+  u.searchParams.set("response_type", "code");
+  u.searchParams.set("client_id", CONFIG.clientId);
+  u.searchParams.set("redirect_uri", CONFIG.redirectUri);
+  u.searchParams.set("scope", CONFIG.scopes);
+  u.searchParams.set("code_challenge", challenge);
+  u.searchParams.set("code_challenge_method", "S256");
+  window.location.href = u.toString();
+}
+
+// ── Auth: exchange the ?code= for tokens ──
+async function exchangeCode(code) {
+  const verifier = sessionStorage.getItem("pkce_verifier");
+  const body = new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: CONFIG.clientId,
+    code,
+    redirect_uri: CONFIG.redirectUri,
+    code_verifier: verifier,
+  });
+  const res = await fetch(CONFIG.userPoolDomain + "/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+  });
+  if (!res.ok) throw new Error("Token exchange failed (" + res.status + ")");
+  return await res.json(); // { id_token, access_token, refresh_token, expires_in }
+}
+
+function signOut() {
+  sessionStorage.clear();
+  const u = new URL(CONFIG.userPoolDomain + "/logout");
+  u.searchParams.set("client_id", CONFIG.clientId);
+  u.searchParams.set("logout_uri", CONFIG.redirectUri);
+  window.location.href = u.toString();
+}
+
+// ── Token helpers ──
+const idToken = () => sessionStorage.getItem("id_token");
+function decodeEmail(token) {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/")));
+    return payload.email || payload["cognito:username"] || "signed in";
+  } catch { return "signed in"; }
+}
+
+// ── API calls (Bearer token on every request) ──
+async function api(path, opts = {}) {
+  const res = await fetch(CONFIG.apiUrl + path, {
+    ...opts,
+    headers: {
+      "Authorization": "Bearer " + idToken(),
+      "Content-Type": "application/json",
+      ...(opts.headers || {}),
+    },
+  });
+  if (res.status === 401) throw new Error("Unauthorized — token expired, sign in again.");
+  return res;
+}
+
+async function loadHabits() {
+  status("Loading…");
+  try {
+    const res = await api("/habits");
+    if (!res.ok) throw new Error("List failed (" + res.status + ")");
+    const habits = await res.json();
+    renderHabits(habits);
+    status("");
+  } catch (e) { status(e.message, true); }
+}
+
+async function addHabit(name, frequency) {
+  status("Saving…");
+  try {
+    const res = await api("/habits", {
+      method: "POST",
+      body: JSON.stringify({ habitName: name, frequency }),
+    });
+    if (!res.ok) throw new Error("Create failed (" + res.status + ")");
+    await loadHabits();
+  } catch (e) { status(e.message, true); }
+}
+
+async function deleteHabit(habitId) {
+  status("Deleting…");
+  try {
+    const res = await api("/habits/" + encodeURIComponent(habitId), { method: "DELETE" });
+    if (!res.ok && res.status !== 204) throw new Error("Delete failed (" + res.status + ")");
+    await loadHabits();
+  } catch (e) { status(e.message, true); }
+}
+
+function renderHabits(habits) {
+  const list = el("habit-list");
+  list.innerHTML = "";
+  el("empty").hidden = habits.length > 0;
+  for (const h of habits) {
+    const li = document.createElement("li");
+    const left = document.createElement("div");
+    left.innerHTML = `<span class="name"></span><span class="freq"></span>`;
+    left.querySelector(".name").textContent = h.habitName;
+    left.querySelector(".freq").textContent = h.frequency;
+    const del = document.createElement("button");
+    del.className = "btn-link";
+    del.textContent = "Delete";
+    del.onclick = () => deleteHabit(h.habitId);
+    li.append(left, del);
+    list.append(li);
+  }
+}
+
+// ── View switching ──
+function showSignedIn() {
+  el("signed-out").hidden = true;
+  el("signed-in").hidden = false;
+  el("who").textContent = decodeEmail(idToken());
+  loadHabits();
+}
+function showSignedOut() {
+  el("signed-in").hidden = true;
+  el("signed-out").hidden = false;
+}
+
+// ── Wire up + boot ──
+el("signin").onclick = startLogin;
+el("signout").onclick = signOut;
+el("habit-form").onsubmit = (e) => {
+  e.preventDefault();
+  const name = el("habit-name").value.trim();
+  if (!name) return;
+  addHabit(name, el("frequency").value);
+  el("habit-name").value = "";
+};
+
+(async function boot() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get("code");
+  const err = params.get("error_description") || params.get("error");
+  if (err) { showSignedOut(); status(decodeURIComponent(err), true); return; }
+
+  if (code) {
+    try {
+      const tokens = await exchangeCode(code);
+      sessionStorage.setItem("id_token", tokens.id_token);
+      window.history.replaceState({}, document.title, CONFIG.redirectUri); // strip ?code
+      showSignedIn();
+    } catch (e) { showSignedOut(); status(e.message, true); }
+    return;
+  }
+
+  if (idToken()) showSignedIn();
+  else showSignedOut();
+})();
+</script>
+</body>
+</html>
