@@ -3,11 +3,19 @@ CRUD application
 COMPUTE - Lambda
     -serverless: managed scales
     -cost effective: pay per request
-NETWORK
-STORAGE - DynamoDB
+NETWORK - HTTP API, Route 53 & CloudFront
+    -api gatway (http api)
+        -JWT authorizer
+        -cost effective compared to rest api
+    -CloudFront - OAC
+STORAGE - DynamoDB & S3 (PK userId and SK habitId)
     -serverless: managed and scales
     -cost effective: on-demand
-SECURITY
+SECURITY - Cognito
+    -JWT authorizer                    
+    -ACM
+    -least privilege
+        -inline policy scoped 
 
 Cognito
 
